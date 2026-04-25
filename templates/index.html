@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Assistive Communication System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <main class="shell">
+        <section class="hero">
+            <p class="eyebrow">Real-Time Assistive Communication</p>
+            <h1>Gesture and emotion recognition from a live webcam feed.</h1>
+            <p class="lede">
+                This interface streams the multimodal pipeline in the browser and combines
+                hand-gesture recognition with facial-expression context.
+            </p>
+        </section>
+
+        <section class="panel">
+            <div class="panel-header">
+                <h2>System Status</h2>
+                <span class="badge {{ 'ready' if ready else 'blocked' }}">
+                    {{ 'Ready' if ready else 'Needs Setup' }}
+                </span>
+            </div>
+
+            {% if warnings %}
+            <ul class="warning-list">
+                {% for warning in warnings %}
+                <li>{{ warning }}</li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p class="status-copy">Camera and recognition pipeline initialized successfully.</p>
+            {% endif %}
+        </section>
+
+        <section class="panel">
+            <div class="panel-header">
+                <h2>Live Feed</h2>
+                <a class="status-link" href="{{ url_for('status') }}">JSON status</a>
+            </div>
+
+            {% if ready %}
+            <div class="feed-frame">
+                <img src="{{ url_for('video_feed') }}" alt="Live video stream">
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <p>The browser feed becomes available after the project dependencies and camera access are set up.</p>
+                <code>python verify_project.py</code>
+            </div>
+            {% endif %}
+        </section>
+
+        <section class="panel">
+            <div class="panel-header">
+                <h2>Latest Prediction</h2>
+                <a class="status-link" href="{{ url_for('prediction') }}">Prediction JSON</a>
+            </div>
+
+            <div class="prediction-grid">
+                <div class="metric-card">
+                    <span class="metric-label">Gesture</span>
+                    <strong id="gesture-value">Waiting...</strong>
+                    <span class="metric-meta" id="gesture-confidence">confidence: --</span>
+                </div>
+                <div class="metric-card">
+                    <span class="metric-label">Emotion</span>
+                    <strong id="emotion-value">Waiting...</strong>
+                    <span class="metric-meta" id="emotion-confidence">confidence: --</span>
+                </div>
+                <div class="metric-card output-card">
+                    <span class="metric-label">Output</span>
+                    <strong id="output-value">Waiting for detections...</strong>
+                    <span class="metric-meta" id="prediction-status">status: initializing</span>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        async function refreshPrediction() {
+            try {
+                const response = await fetch("{{ url_for('prediction') }}", { cache: "no-store" });
+                const payload = await response.json();
+
+                document.getElementById("gesture-value").textContent = payload.gesture || "No stable gesture";
+                document.getElementById("emotion-value").textContent = payload.emotion || "No stable emotion";
+                document.getElementById("output-value").textContent = payload.output || "Show your hand or face to the camera";
+                document.getElementById("gesture-confidence").textContent =
+                    "confidence: " + (payload.gesture_confidence ?? 0).toFixed(2);
+                document.getElementById("emotion-confidence").textContent =
+                    "confidence: " + (payload.emotion_confidence ?? 0).toFixed(2);
+
+                const state = payload.ready ? "camera ready" : "camera unavailable";
+                document.getElementById("prediction-status").textContent = "status: " + state;
+            } catch (error) {
+                document.getElementById("prediction-status").textContent = "status: could not refresh prediction";
+            }
+        }
+
+        refreshPrediction();
+        setInterval(refreshPrediction, 1000);
+    </script>
+</body>
+</html>
