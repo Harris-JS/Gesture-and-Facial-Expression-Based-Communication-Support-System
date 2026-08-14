@@ -1,33 +1,29 @@
 from utils.runtime_env import configure_runtime_environment
-
 configure_runtime_environment()
 
 import cv2
 import mediapipe as mp
 
-
 class PreprocessingModule:
-    def __init__(self):
-        self.mp_hands = mp.solutions.hands
-        self.hands = self.mp_hands.Hands(
-            max_num_hands=1,
-            min_detection_confidence=0.7,
+    def __init__(self, fast_mode: bool = False):
+        self.fast_mode = fast_mode
+        # We will use MediaPipe Holistic to extract everything at once
+        self.mp_holistic = mp.solutions.holistic
+        self.holistic = self.mp_holistic.Holistic(
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+            model_complexity=0 if fast_mode else 1,
         )
         self.mp_draw = mp.solutions.drawing_utils
 
-        self.mp_face = mp.solutions.face_detection
-        self.face = self.mp_face.FaceDetection(
-            model_selection=0,
-            min_detection_confidence=0.7,
-        )
-
-        self.mp_face_mesh = mp.solutions.face_mesh
-        self.face_mesh = self.mp_face_mesh.FaceMesh(
-            static_image_mode=False,
-            max_num_faces=1,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5,
-        )
+        self.mp_face = None
+        self.face = None
+        if not fast_mode:
+            self.mp_face = mp.solutions.face_detection
+            self.face = self.mp_face.FaceDetection(
+                model_selection=0,
+                min_detection_confidence=0.7,
+            )
 
     @staticmethod
     def _bbox_from_detection(detection, frame_shape):
@@ -39,64 +35,33 @@ class PreprocessingModule:
         bh = int(bbox.height * h)
         return (x, y, bw, bh)
 
-    @staticmethod
-    def _bbox_from_face_mesh(face_landmarks, frame_shape, padding_ratio=0.18):
-        h, w, _ = frame_shape
-        xs = [lm.x * w for lm in face_landmarks.landmark]
-        ys = [lm.y * h for lm in face_landmarks.landmark]
-        if not xs or not ys:
-            return None
-
-        min_x, max_x = min(xs), max(xs)
-        min_y, max_y = min(ys), max(ys)
-        width = max_x - min_x
-        height = max_y - min_y
-        size = max(width, height)
-        pad = size * padding_ratio
-
-        cx = (min_x + max_x) / 2.0
-        cy = (min_y + max_y) / 2.0
-        half = (size / 2.0) + pad
-
-        x0 = max(0, int(cx - half))
-        y0 = max(0, int(cy - half))
-        x1 = min(w, int(cx + half))
-        y1 = min(h, int(cy + half))
-
-        if x1 <= x0 or y1 <= y0:
-            return None
-        return (x0, y0, x1 - x0, y1 - y0)
-
     def process(self, frame):
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-        hand_results = self.hands.process(rgb)
-        face_results = self.face.process(rgb)
-        face_mesh_results = self.face_mesh.process(rgb)
+        # 1. Holistic processing for Gestures (Pose, LH, RH)
+        holistic_results = self.holistic.process(rgb)
 
-        hand_landmarks = None
-        face_landmarks = None
+        # 2. Face detection for Emotion cropping (skipped in fast/web mode)
+        face_results = None
+        if self.face is not None:
+            face_results = self.face.process(rgb)
+
         face_bbox = None
-
-        if hand_results.multi_hand_landmarks:
-            hand_landmarks = hand_results.multi_hand_landmarks[0]
-            self.mp_draw.draw_landmarks(
-                frame,
-                hand_landmarks,
-                self.mp_hands.HAND_CONNECTIONS,
-            )
-
-        if face_results.detections:
+        if face_results and face_results.detections:
             face_bbox = self._bbox_from_detection(face_results.detections[0], frame.shape)
-
-        if face_mesh_results and face_mesh_results.multi_face_landmarks:
-            face_landmarks = face_mesh_results.multi_face_landmarks[0]
-            mesh_bbox = self._bbox_from_face_mesh(face_landmarks, frame.shape)
-            if mesh_bbox is not None:
-                face_bbox = mesh_bbox
-
-        if face_bbox is not None:
             x, y, bw, bh = face_bbox
             cv2.rectangle(frame, (x, y), (x + bw, y + bh), (0, 255, 0), 2)
 
-        return frame, hand_landmarks, face_landmarks, face_bbox
+        # Draw holistic landmarks for visualization
+        if holistic_results.pose_landmarks:
+            self.mp_draw.draw_landmarks(frame, holistic_results.pose_landmarks, self.mp_holistic.POSE_CONNECTIONS)
+        if holistic_results.left_hand_landmarks:
+            self.mp_draw.draw_landmarks(frame, holistic_results.left_hand_landmarks, self.mp_holistic.HAND_CONNECTIONS)
+        if holistic_results.right_hand_landmarks:
+            self.mp_draw.draw_landmarks(frame, holistic_results.right_hand_landmarks, self.mp_holistic.HAND_CONNECTIONS)
+
+        # To keep compatibility with pipeline, we map holistic face landmarks to face_landmarks
+        # though it's technically dense face mesh.
+        face_landmarks = holistic_results.face_landmarks
+
+        return frame, holistic_results, face_landmarks, face_bbox

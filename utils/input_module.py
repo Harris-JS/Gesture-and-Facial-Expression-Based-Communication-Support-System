@@ -59,6 +59,9 @@ class VideoCaptureModule:
                     continue
 
                 if cap.isOpened():
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                     self.cap = cap
                     self.camera_index = index
                     self.backend_name = backend_name

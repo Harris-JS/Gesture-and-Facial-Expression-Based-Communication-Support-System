@@ -2,11 +2,17 @@ import importlib.util
 import os
 import sys
 
+# Allow running from scripts/ subfolder — add project root to path
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+os.chdir(_PROJECT_ROOT)
+
 
 REQUIRED_FILES = [
     "app.py",
     "web_app.py",
-    "PLAN.md",
+    "docs/PLAN.md",
     "README.md",
     "utils/pipeline.py",
     "models/gesture/gesture_model.py",

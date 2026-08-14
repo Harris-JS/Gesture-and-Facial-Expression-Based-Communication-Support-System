@@ -1,0 +1,35 @@
+SignVision AI — Demo vocabulary
+========================================
+Trained words: 20
+
+Index | Word      | How to sign (short guide)
+----------------------------------------
+    1 | help      | One hand on flat palm; lift together (A-handshape on flat hand).
+    2 | yes       | Fist nods forward (like head nod).
+    3 | no        | Index and middle tap together twice (or snap).
+    4 | fine      | Thumb tip touches chest then brushes off (I'm fine).
+    5 | go        | Hands point/move forward in travel direction.
+    6 | eat       | Hand to mouth (food motion).
+    7 | drink     | C-handshape to mouth (drink motion).
+    8 | book      | Open palms like opening a book.
+    9 | school    | Clap hands together twice (school sign).
+   10 | family    | F-handshape circles at side of forehead (family).
+   11 | want      | Both hands pull toward body (desire).
+   12 | like      | Thumb up from chest (like/enjoy).
+   13 | play      | Y-hands shake (play/fun).
+   14 | work      | Fists tap wrists (work).
+   15 | meet      | Index fingers meet in front of body.
+   16 | enjoy     | Hands on chest move upward (enjoy/happy).
+   17 | give      | Both hands move from you toward other person.
+   18 | mother    | Thumb taps chin (mother).
+   19 | dog       | Snap fingers or pat leg (dog).
+   20 | finish    | Hands flip down sharply (done/finish).
+
+Tips for live demo:
+  • Face the webcam with good lighting.
+  • Hold each sign steady for about 1–2 seconds.
+  • Keep both hands visible when possible.
+  • Run the web app: python web_app.py
+
+WLASL words were trained from pre-extracted sequences.
+Custom words (hello, hi, welcome, thanks, please) need your recordings.

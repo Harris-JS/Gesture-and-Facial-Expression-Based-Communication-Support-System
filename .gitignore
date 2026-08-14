@@ -7,9 +7,23 @@ wheels/
 *.egg-info
 
 # Virtual environments
-.venv
+tf_venv/
+.venv/
+venv/
 
 # Local runtime and uv caches
 .runtime-cache/
 .uv-cache/
 .uv-python/
+
+# Dataset (large files)
+dataset/
+
+# Project documentation kept out of GitHub
+docs/
+
+# Editor / OS files
+.vscode/
+.idea/
+*.DS_Store
+Thumbs.db

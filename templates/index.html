@@ -1,108 +1,318 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Assistive Communication System</title>
+    <meta name="description" content="Real-time AI Sign Language Interpreter with emotion-aware sentence generation and multilingual translation.">
+    <title>SignVision AI — Live Interpreter</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
-<body>
-    <main class="shell">
-        <section class="hero">
-            <p class="eyebrow">Real-Time Assistive Communication</p>
-            <h1>Gesture and emotion recognition from a live webcam feed.</h1>
-            <p class="lede">
-                This interface streams the multimodal pipeline in the browser and combines
-                hand-gesture recognition with facial-expression context.
-            </p>
-        </section>
 
-        <section class="panel">
-            <div class="panel-header">
-                <h2>System Status</h2>
-                <span class="badge {{ 'ready' if ready else 'blocked' }}">
-                    {{ 'Ready' if ready else 'Needs Setup' }}
-                </span>
+<body>
+    <div class="app-shell">
+
+        <!-- ══════════════════════════════════════════════
+             SIDEBAR — Controls & Status
+        ══════════════════════════════════════════════ -->
+        <aside class="sidebar">
+            <!-- Brand -->
+            <div class="brand">
+                <div class="brand-icon">✋</div>
+                <div>
+                    <h1 class="brand-name">SignVision AI</h1>
+                    <p class="brand-tagline">Live Sign Language Interpreter</p>
+                </div>
+            </div>
+
+            <!-- System Status -->
+            <div class="status-badge {{ 'status-ready' if ready else 'status-offline' }}">
+                <span class="status-dot"></span>
+                <span>{{ 'System Ready' if ready else 'Camera Offline' }}</span>
             </div>
 
             {% if warnings %}
-            <ul class="warning-list">
-                {% for warning in warnings %}
-                <li>{{ warning }}</li>
-                {% endfor %}
-            </ul>
-            {% else %}
-            <p class="status-copy">Camera and recognition pipeline initialized successfully.</p>
-            {% endif %}
-        </section>
-
-        <section class="panel">
-            <div class="panel-header">
-                <h2>Live Feed</h2>
-                <a class="status-link" href="{{ url_for('status') }}">JSON status</a>
-            </div>
-
-            {% if ready %}
-            <div class="feed-frame">
-                <img src="{{ url_for('video_feed') }}" alt="Live video stream">
-            </div>
-            {% else %}
-            <div class="empty-state">
-                <p>The browser feed becomes available after the project dependencies and camera access are set up.</p>
-                <code>python verify_project.py</code>
+            <div class="warning-box">
+                <p class="warning-title">⚠ System Warnings</p>
+                <ul>
+                    {% for w in warnings %}
+                    <li>{{ w }}</li>
+                    {% endfor %}
+                </ul>
             </div>
             {% endif %}
-        </section>
 
-        <section class="panel">
-            <div class="panel-header">
-                <h2>Latest Prediction</h2>
-                <a class="status-link" href="{{ url_for('prediction') }}">Prediction JSON</a>
+            <!-- Divider -->
+            <hr class="divider">
+
+            <!-- Output Language -->
+            <div class="control-group">
+                <label class="control-label" for="language-select">🌐 Output Language</label>
+                <select id="language-select" class="modern-select" onchange="updateConfig()">
+                    <option value="en">English</option>
+                    <option value="hi">Hindi — हिन्दी</option>
+                    <option value="ta">Tamil — தமிழ்</option>
+                    <option value="te">Telugu — తెలుగు</option>
+                    <option value="kn">Kannada — ಕನ್ನಡ</option>
+                    <option value="ml">Malayalam — മലയാളം</option>
+                </select>
             </div>
 
-            <div class="prediction-grid">
-                <div class="metric-card">
-                    <span class="metric-label">Gesture</span>
-                    <strong id="gesture-value">Waiting...</strong>
-                    <span class="metric-meta" id="gesture-confidence">confidence: --</span>
+            <!-- TTS Toggle -->
+            <div class="control-group">
+                <span class="control-label">🔊 Voice Output (TTS)</span>
+                <label class="toggle-switch" for="tts-toggle">
+                    <input type="checkbox" id="tts-toggle" onchange="updateConfig()">
+                    <span class="slider"></span>
+                    <span class="toggle-label" id="tts-label">Off</span>
+                </label>
+            </div>
+
+            <!-- Clear Sentence Button -->
+            <button class="btn-clear" onclick="clearSentence()" title="Clear accumulated sign sentence">
+                ✕ Clear Sentence
+            </button>
+
+            <hr class="divider">
+
+            <!-- How to use -->
+            <div class="help-box">
+                <p class="help-title">How to use</p>
+                <ol class="help-list">
+                    <li>Face the webcam with good lighting</li>
+                    <li>Perform ASL signs clearly</li>
+                    <li>Signs build into a sentence automatically</li>
+                    <li>Sentence resets after 4 s of inactivity</li>
+                    <li>Select a language to translate</li>
+                </ol>
+            </div>
+
+            <!-- API Links (footer) -->
+            <div class="sidebar-footer">
+                <a href="{{ url_for('status') }}" target="_blank" class="api-link">Status API</a>
+                <a href="{{ url_for('prediction') }}" target="_blank" class="api-link">Prediction API</a>
+            </div>
+        </aside>
+
+        <!-- ══════════════════════════════════════════════
+             MAIN — Video + Live Interpretation Panel
+        ══════════════════════════════════════════════ -->
+        <main class="main-content">
+
+            <!-- Live Camera Feed -->
+            <div class="video-wrapper">
+                {% if ready %}
+                <img
+                    id="video-feed"
+                    class="video-feed"
+                    src="{{ url_for('video_feed') }}"
+                    alt="Live webcam feed for sign language recognition">
+                {% else %}
+                <div class="video-placeholder">
+                    <div class="placeholder-icon">📷</div>
+                    <p>Camera feed unavailable</p>
+                    <p class="placeholder-sub">Check system status in the sidebar</p>
                 </div>
-                <div class="metric-card">
-                    <span class="metric-label">Emotion</span>
-                    <strong id="emotion-value">Waiting...</strong>
-                    <span class="metric-meta" id="emotion-confidence">confidence: --</span>
+                {% endif %}
+
+                <!-- Live badge -->
+                <div class="live-badge" id="live-badge">
+                    <span class="live-dot"></span> LIVE
                 </div>
-                <div class="metric-card output-card">
-                    <span class="metric-label">Output</span>
-                    <strong id="output-value">Waiting for detections...</strong>
-                    <span class="metric-meta" id="prediction-status">status: initializing</span>
+
+                <!-- Detected Sign Flash (bottom-center overlay) -->
+                <div class="sign-flash glass-panel" id="sign-flash-panel">
+                    <span class="sign-flash-label">Detected Sign</span>
+                    <span class="sign-flash-word" id="sign-flash-word">—</span>
+                    <span class="sign-flash-conf" id="sign-flash-conf"></span>
                 </div>
             </div>
-        </section>
-    </main>
+
+            <!-- ── Interpretation Output Panel ── -->
+            <div class="interpretation-panel">
+
+                <!-- Row 1: Detected Sign + Detected Emotion -->
+                <div class="info-row">
+                    <div class="info-card glass-panel" id="card-sign">
+                        <p class="info-label">✋ Detected Sign</p>
+                        <p class="info-value" id="val-sign">—</p>
+                        <p class="info-sub" id="val-sign-conf">Confidence: 0%</p>
+                    </div>
+                    <div class="info-card glass-panel" id="card-emotion">
+                        <p class="info-label">😊 Detected Emotion</p>
+                        <p class="info-value" id="val-emotion">—</p>
+                        <p class="info-sub" id="val-emotion-conf">Confidence: 0%</p>
+                    </div>
+                </div>
+
+                <!-- Row 2: Interpreted Meaning (the big output) -->
+                <div class="interpreted-card glass-panel">
+                    <div class="interpreted-header">
+                        <p class="info-label">💬 Interpreted Meaning</p>
+                        <span class="updating-badge" id="updating-badge">updating…</span>
+                    </div>
+                    <p class="interpreted-sentence" id="val-interpreted">
+                        Sign clearly into the camera to begin…
+                    </p>
+                    <p class="info-sub raw-sentence-display" id="val-raw">
+                        <span class="raw-label">Raw signs:</span>
+                        <span id="val-raw-inner">—</span>
+                    </p>
+                </div>
+
+                <!-- Row 3: Translation -->
+                <div class="translation-card glass-panel" id="translation-card">
+                    <p class="info-label" id="translation-lang-label">🌐 Translation</p>
+                    <p class="translated-text" id="val-translated">—</p>
+                </div>
+
+            </div>
+        </main>
+    </div>
 
     <script>
+        // ─── Language labels ─────────────────────────────────────────────────
+        const LANG_LABELS = {
+            en: "English",
+            hi: "Hindi — हिन्दी",
+            ta: "Tamil — தமிழ்",
+            te: "Telugu — తెలుగు",
+            kn: "Kannada — ಕನ್ನಡ",
+            ml: "Malayalam — മലയാളം",
+        };
+
+        // ─── Emotion → colour accent ──────────────────────────────────────────
+        const EMOTION_COLOURS = {
+            happy:    "#facc15",
+            sad:      "#60a5fa",
+            angry:    "#f87171",
+            surprise: "#fb923c",
+            fear:     "#a78bfa",
+            disgust:  "#34d399",
+            neutral:  "#94a3b8",
+        };
+
+        let _prevInterpreted = "";
+        let _updatingTimer   = null;
+
+        // ─── Main poll ───────────────────────────────────────────────────────
         async function refreshPrediction() {
             try {
-                const response = await fetch("{{ url_for('prediction') }}", { cache: "no-store" });
-                const payload = await response.json();
+                const res = await fetch("{{ url_for('prediction') }}", { cache: "no-store" });
+                const p   = await res.json();
 
-                document.getElementById("gesture-value").textContent = payload.gesture || "No stable gesture";
-                document.getElementById("emotion-value").textContent = payload.emotion || "No stable emotion";
-                document.getElementById("output-value").textContent = payload.output || "Show your hand or face to the camera";
-                document.getElementById("gesture-confidence").textContent =
-                    "confidence: " + (payload.gesture_confidence ?? 0).toFixed(2);
-                document.getElementById("emotion-confidence").textContent =
-                    "confidence: " + (payload.emotion_confidence ?? 0).toFixed(2);
+                const pct = v => `${Math.round((v ?? 0) * 100)}%`;
 
-                const state = payload.ready ? "camera ready" : "camera unavailable";
-                document.getElementById("prediction-status").textContent = "status: " + state;
-            } catch (error) {
-                document.getElementById("prediction-status").textContent = "status: could not refresh prediction";
+                // ── Detected Sign
+                const sign = p.gesture || "—";
+                document.getElementById("val-sign").textContent        = sign;
+                document.getElementById("val-sign-conf").textContent   = `Confidence: ${pct(p.gesture_confidence)}`;
+                document.getElementById("sign-flash-word").textContent = sign;
+                document.getElementById("sign-flash-conf").textContent = p.gesture ? pct(p.gesture_confidence) : "";
+
+                // Pulse the sign flash card when a gesture is detected
+                const flashPanel = document.getElementById("sign-flash-panel");
+                if (p.gesture) {
+                    flashPanel.classList.add("active");
+                } else {
+                    flashPanel.classList.remove("active");
+                }
+
+                // ── Detected Emotion
+                const emotionKey = (p.emotion || "").toLowerCase();
+                document.getElementById("val-emotion").textContent      = p.emotion || "—";
+                document.getElementById("val-emotion-conf").textContent = `Confidence: ${pct(p.emotion_confidence)}`;
+                const emotionColour = EMOTION_COLOURS[emotionKey] || "#94a3b8";
+                document.getElementById("card-emotion").style.setProperty("--emotion-accent", emotionColour);
+
+                // ── Interpreted Sentence
+                const interpreted = p.interpreted_sentence || "";
+                document.getElementById("val-interpreted").textContent =
+                    interpreted || "Sign clearly into the camera to begin…";
+
+                // Flash "updating…" badge when text changes
+                if (interpreted && interpreted !== _prevInterpreted) {
+                    _prevInterpreted = interpreted;
+                    const badge = document.getElementById("updating-badge");
+                    badge.classList.add("visible");
+                    clearTimeout(_updatingTimer);
+                    _updatingTimer = setTimeout(() => badge.classList.remove("visible"), 800);
+                }
+
+                // ── Raw accumulated signs
+                document.getElementById("val-raw-inner").textContent = p.accumulated_sentence || "—";
+
+                // ── Translation
+                const translationCard  = document.getElementById("translation-card");
+                const translatedText   = p.translated_output;
+                const selectedLang     = document.getElementById("language-select").value;
+                if (translatedText && selectedLang !== "en") {
+                    translationCard.style.display = "block";
+                    document.getElementById("translation-lang-label").textContent =
+                        `🌐 ${LANG_LABELS[selectedLang] || selectedLang} Translation`;
+                    document.getElementById("val-translated").textContent = translatedText;
+                } else {
+                    translationCard.style.display = selectedLang === "en" ? "none" : "block";
+                    document.getElementById("val-translated").textContent = translatedText || "—";
+                }
+
+                // ── Status badge
+                const live   = document.getElementById("live-badge");
+                const ready  = p.ready;
+                live.classList.toggle("live-offline", !ready);
+
+            } catch (e) {
+                document.getElementById("live-badge").classList.add("live-offline");
             }
         }
 
+        // ─── Config push ─────────────────────────────────────────────────────
+        async function updateConfig() {
+            const lang = document.getElementById("language-select").value;
+            const tts  = document.getElementById("tts-toggle").checked;
+            document.getElementById("tts-label").textContent = tts ? "On" : "Off";
+
+            // Show / hide translation card
+            document.getElementById("translation-card").style.display =
+                lang === "en" ? "none" : "block";
+
+            try {
+                await fetch("{{ url_for('config') }}", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ target_language: lang, tts_enabled: tts }),
+                });
+            } catch (e) { console.error("Config update failed", e); }
+        }
+
+        // ─── Clear sentence ───────────────────────────────────────────────────
+        async function clearSentence() {
+            try {
+                await fetch("{{ url_for('clear_sentence') }}", { method: "POST" });
+                document.getElementById("val-interpreted").textContent = "Sign clearly into the camera to begin…";
+                document.getElementById("val-raw-inner").textContent   = "—";
+                document.getElementById("val-translated").textContent  = "—";
+                _prevInterpreted = "";
+            } catch (e) { console.error("Clear failed", e); }
+        }
+
+        // ─── Boot ─────────────────────────────────────────────────────────────
+        // Hide translation card if default lang is English
+        document.addEventListener("DOMContentLoaded", () => {
+            const lang = document.getElementById("language-select").value;
+            if (lang === "en") {
+                document.getElementById("translation-card").style.display = "none";
+            }
+        });
+
         refreshPrediction();
-        setInterval(refreshPrediction, 1000);
+        setInterval(refreshPrediction, 300);   // ~3 FPS polling
     </script>
 </body>
+
 </html>

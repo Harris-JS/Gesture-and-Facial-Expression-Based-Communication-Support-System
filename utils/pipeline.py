@@ -1,17 +1,61 @@
 from dataclasses import dataclass, field
 from collections import deque
 from typing import Any, List, Optional
+import os
+import threading
+import time
 
 import numpy as np
 
 
+# ---------------------------------------------------------------------------
+# Emotion-Aware Semantic Fusion
+# ---------------------------------------------------------------------------
+
+# Maps emotion -> (sentence_ending, emoji, prefix_exclamation)
+_EMOTION_RULES = {
+    "happy":    ("! 😊",   ""),
+    "sad":      ("... 😔",  ""),
+    "surprise": ("? 😲",   "Oh! "),
+    "angry":    (". 😠",    ""),
+    "fear":     ("... 😨",  ""),
+    "disgust":  (". 😒",    ""),
+    "neutral":  (".",       ""),
+}
+
+
+def apply_emotion_semantics(sentence: str, emotion: Optional[str]) -> str:
+    """Take a raw accumulated sentence and emotion, return a naturally
+    punctuated, emoji-annotated interpretation string."""
+    if not sentence:
+        return sentence
+
+    # Strip trailing whitespace / existing punctuation for clean insertion
+    cleaned = sentence.strip().rstrip(".!?,")
+
+    if not emotion:
+        return cleaned + "."
+
+    key = emotion.lower()
+    ending, prefix = _EMOTION_RULES.get(key, (".", ""))
+
+    # Capitalise first word
+    words = cleaned.split()
+    if words:
+        words[0] = words[0].capitalize()
+    cleaned = " ".join(words)
+
+    return f"{prefix}{cleaned}{ending}"
+
+
+# Legacy shim – kept so existing unit-tests that import fuse_predictions still pass
 def fuse_predictions(gesture: Optional[str], emotion: Optional[str]) -> Optional[str]:
     parts = []
     if gesture:
-        parts.append(str(gesture))
+        parts.append(str(gesture).capitalize())
     if emotion:
-        parts.append(str(emotion))
-    return " + ".join(parts) if parts else None
+        parts.append(f"({str(emotion).capitalize()})")
+    return " ".join(parts) if parts else None
 
 
 def build_output_message(
@@ -33,6 +77,62 @@ def build_output_message(
     return None
 
 
+# ---------------------------------------------------------------------------
+# Sentence Accumulator
+# ---------------------------------------------------------------------------
+
+class SentenceAccumulator:
+    """Accumulates stabilised gesture labels into a running sentence.
+
+    Rules
+    -----
+    * A new word is appended only when the gesture changes (no duplicate
+      repetition of the same label).
+    * If no new word arrives within *timeout_sec* seconds the sentence is
+      considered complete and the buffer is cleared so the next sign starts
+      a fresh sentence.
+    * Maximum sentence length is capped at *max_words* to prevent unbounded
+      growth during demos.
+    """
+
+    def __init__(self, timeout_sec: float = 4.0, max_words: int = 12):
+        self._words: List[str] = []
+        self._last_word: Optional[str] = None
+        self._last_update: float = 0.0
+        self.timeout_sec = timeout_sec
+        self.max_words = max_words
+
+    def push(self, word: Optional[str]) -> None:
+        """Feed the latest stabilised gesture label."""
+        now = time.monotonic()
+
+        # Auto-clear if idle for too long
+        if self._words and (now - self._last_update) > self.timeout_sec:
+            self._words = []
+            self._last_word = None
+
+        if not word:
+            return
+
+        # Append only on change
+        if word != self._last_word:
+            if len(self._words) < self.max_words:
+                self._words.append(word.lower())
+            self._last_word = word
+            self._last_update = now
+
+    def sentence(self) -> str:
+        return " ".join(self._words)
+
+    def clear(self) -> None:
+        self._words = []
+        self._last_word = None
+
+
+# ---------------------------------------------------------------------------
+# Data Structures
+# ---------------------------------------------------------------------------
+
 @dataclass
 class FramePrediction:
     frame: Any
@@ -42,6 +142,13 @@ class FramePrediction:
     gesture_confidence: float = 0.0
     emotion_confidence: float = 0.0
     emotion_candidates: List[str] = field(default_factory=list)
+    # Raw accumulated sign words (space-separated, e.g. "hello how are you")
+    accumulated_sentence: str = ""
+    # Emotion-aware interpreted sentence (e.g. "Hello! How are you? 😊")
+    interpreted_sentence: str = ""
+    # Translated version of interpreted_sentence
+    translated_output: Optional[str] = None
+    # Legacy field kept for backwards-compat
     output: Optional[str] = None
     warnings: List[str] = field(default_factory=list)
 
@@ -55,11 +162,11 @@ def apply_prediction_overlay(frame: Any, prediction: FramePrediction) -> Any:
     if prediction.gesture:
         cv2.putText(
             frame,
-            f"Gesture: {prediction.gesture} ({prediction.gesture_confidence:.2f})",
+            f"Sign: {prediction.gesture} ({prediction.gesture_confidence:.2f})",
             (10, 40),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.9,
-            (0, 0, 255),
+            0.8,
+            (0, 200, 255),
             2,
         )
     if prediction.emotion:
@@ -68,44 +175,78 @@ def apply_prediction_overlay(frame: Any, prediction: FramePrediction) -> Any:
             f"Emotion: {prediction.emotion} ({prediction.emotion_confidence:.2f})",
             (10, 80),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.9,
-            (0, 255, 0),
+            0.8,
+            (100, 255, 100),
             2,
         )
-    if prediction.output:
+    if prediction.interpreted_sentence:
+        display = (
+            prediction.translated_output
+            if prediction.translated_output
+            else prediction.interpreted_sentence
+        )
+        # Truncate for overlay
+        if len(display) > 55:
+            display = display[:52] + "..."
         cv2.putText(
             frame,
-            f"Output: {prediction.output}",
-            (10, 120),
+            display,
+            (10, 130),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            (255, 0, 0),
+            0.75,
+            (255, 255, 255),
             2,
         )
     return frame
 
 
+# ---------------------------------------------------------------------------
+# Runtime
+# ---------------------------------------------------------------------------
+
 class AssistiveCommunicationRuntime:
-    def __init__(self, camera_index: int = 0):
+    def __init__(
+        self,
+        camera_index: int = 0,
+        *,
+        enable_emotion: bool = True,
+        fast_mode: bool = False,
+    ):
         self.camera_index = camera_index
+        self.enable_emotion = enable_emotion
+        self.fast_mode = fast_mode
         self.video = None
         self.preprocess = None
         self.feature_extractor = None
         self.gesture_model = None
         self.emotion_model = None
+        self.translator = None
+        self.speech = None
+
+        # Configuration
+        self.target_language = "en"
+        self.tts_enabled = False
+        self.last_spoken_output: Optional[str] = None
+
         self.warnings: List[str] = []
         self._label_state = {
             "gesture": {"candidate": None, "streak": 0, "stable": None},
             "emotion": {"candidate": None, "streak": 0, "stable": None},
         }
         self._emotion_scores = deque(maxlen=5)
+        self._gesture_sequence_length = 30
+        self._gesture_buffer = deque(maxlen=30)
+        self._gesture_threshold = 0.35 if fast_mode else 0.60
+        self._gesture_hits = 2 if fast_mode else 3
+        self._gesture_load_started = False
+        self._gesture_load_lock = threading.Lock()
+        self._accumulator = SentenceAccumulator(timeout_sec=4.0)
         self._initialize_components()
 
     @staticmethod
     def _extract_aligned_face(frame: Any, face_landmarks: Any, face_bbox: Any) -> Any:
         if face_bbox is None:
             return None
-
         x, y, bw, bh = face_bbox
         x0 = max(0, x)
         y0 = max(0, y)
@@ -113,56 +254,7 @@ class AssistiveCommunicationRuntime:
         y1 = min(frame.shape[0], y + bh)
         if x1 <= x0 or y1 <= y0:
             return None
-
-        if face_landmarks is None:
-            return frame[y0:y1, x0:x1]
-
-        try:
-            import cv2
-        except Exception:
-            return frame[y0:y1, x0:x1]
-
-        # MediaPipe face mesh eye corner landmarks.
-        left_eye_indices = [33, 133]
-        right_eye_indices = [362, 263]
-
-        def _center(indices):
-            xs = [face_landmarks.landmark[index].x * frame.shape[1] for index in indices]
-            ys = [face_landmarks.landmark[index].y * frame.shape[0] for index in indices]
-            return float(sum(xs) / len(xs)), float(sum(ys) / len(ys))
-
-        left_eye = _center(left_eye_indices)
-        right_eye = _center(right_eye_indices)
-        dx = right_eye[0] - left_eye[0]
-        dy = right_eye[1] - left_eye[1]
-        if dx == 0 and dy == 0:
-            return frame[y0:y1, x0:x1]
-
-        angle = np.degrees(np.arctan2(dy, dx))
-        eye_center = ((left_eye[0] + right_eye[0]) / 2.0, (left_eye[1] + right_eye[1]) / 2.0)
-        matrix = cv2.getRotationMatrix2D(eye_center, angle, 1.0)
-        aligned = cv2.warpAffine(
-            frame,
-            matrix,
-            (frame.shape[1], frame.shape[0]),
-            flags=cv2.INTER_LINEAR,
-            borderMode=cv2.BORDER_REPLICATE,
-        )
-
-        corners = np.array(
-            [[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
-            dtype=np.float32,
-        )
-        ones = np.ones((corners.shape[0], 1), dtype=np.float32)
-        transformed = np.hstack([corners, ones]) @ matrix.T
-        tx0 = max(0, int(np.min(transformed[:, 0])))
-        ty0 = max(0, int(np.min(transformed[:, 1])))
-        tx1 = min(aligned.shape[1], int(np.max(transformed[:, 0])))
-        ty1 = min(aligned.shape[0], int(np.max(transformed[:, 1])))
-        if tx1 <= tx0 or ty1 <= ty0:
-            return frame[y0:y1, x0:x1]
-
-        return aligned[ty0:ty1, tx0:tx1]
+        return frame[y0:y1, x0:x1]
 
     def _format_top_candidates(self, scores, labels, limit=3):
         if scores is None:
@@ -180,53 +272,84 @@ class AssistiveCommunicationRuntime:
         required_hits: int,
     ) -> Optional[str]:
         state = self._label_state[key]
-
         if not detected:
             state["candidate"] = None
             state["streak"] = 0
             state["stable"] = None
             return None
-
         if candidate is None or confidence < threshold:
             state["candidate"] = None
             state["streak"] = 0
             return None
-
         if state["stable"] == candidate:
             state["candidate"] = candidate
             state["streak"] = required_hits
             return candidate
-
         if state["candidate"] == candidate:
             state["streak"] += 1
         else:
             state["candidate"] = candidate
             state["streak"] = 1
-
         if state["streak"] >= required_hits:
             state["stable"] = candidate
             return candidate
-
         return None
 
     def _initialize_components(self) -> None:
         try:
             from utils.input_module import VideoCaptureModule
-
-            self.video = VideoCaptureModule(camera_index=self.camera_index)
+            max_idx = 1 if self.fast_mode else 4
+            backend = "DSHOW" if self.fast_mode and os.name == "nt" else None
+            self.video = VideoCaptureModule(
+                camera_index=self.camera_index,
+                max_camera_index=max_idx,
+                backend=backend,
+            )
         except Exception as exc:
             self.warnings.append(f"Camera unavailable: {exc}")
             return
 
+        if self.fast_mode:
+            # Web: open camera first; load MediaPipe/model on first processed frame.
+            return
+
+        self._init_ml_components()
+
+    def _init_ml_components(self) -> None:
         try:
             from utils.preprocessing import PreprocessingModule
             from utils.feature_extraction import FeatureExtractionModule
-
-            self.preprocess = PreprocessingModule()
+            self.preprocess = PreprocessingModule(fast_mode=self.fast_mode)
             self.feature_extractor = FeatureExtractionModule()
         except Exception as exc:
             self.warnings.append(f"Preprocessing unavailable: {exc}")
 
+        if not self.fast_mode:
+            self._load_gesture_model()
+
+        if self.enable_emotion:
+            try:
+                from models.emotion.emotion_model import EmotionModel
+                self.emotion_model = EmotionModel(labels_path="models/emotion/labels.txt")
+                if getattr(self.emotion_model, "backend", None) is None:
+                    self.warnings.append("Emotion model backend could not be loaded.")
+            except Exception as exc:
+                self.warnings.append(f"Emotion model unavailable: {exc}")
+
+        try:
+            from utils.translation import TranslationModule
+            self.translator = TranslationModule()
+        except Exception as exc:
+            self.warnings.append(f"Translation module unavailable: {exc}")
+
+        if not self.fast_mode:
+            try:
+                from utils.speech import SpeechModule
+                self.speech = SpeechModule()
+            except Exception as exc:
+                self.warnings.append(f"Speech module unavailable: {exc}")
+
+    def _load_gesture_model(self) -> None:
         try:
             from models.gesture.gesture_model import GestureModel
 
@@ -238,18 +361,26 @@ class AssistiveCommunicationRuntime:
         except Exception as exc:
             self.warnings.append(f"Gesture model unavailable: {exc}")
 
-        try:
-            from models.emotion.emotion_model import EmotionModel
+    def ensure_gesture_model_async(self) -> None:
+        if self.gesture_model is not None:
+            return
+        with self._gesture_load_lock:
+            if self._gesture_load_started:
+                return
+            self._gesture_load_started = True
 
-            self.emotion_model = EmotionModel(labels_path="models/emotion/labels.txt")
-            if self.emotion_model.model is None:
-                self.warnings.append(
-                    "Emotion model file not loaded. Train one with models/emotion/train_emotion_model.py."
-                )
-            elif getattr(self.emotion_model, "backend", None) == "huggingface":
-                self.warnings.append("Emotion model backend: Hugging Face ViT face-expression model.")
-        except Exception as exc:
-            self.warnings.append(f"Emotion model unavailable: {exc}")
+        def _load():
+            self._load_gesture_model()
+
+        threading.Thread(target=_load, daemon=True).start()
+
+    def ensure_ml_ready(self) -> None:
+        """Lazy-load MediaPipe and feature extraction (web fast startup)."""
+        if self.preprocess is not None:
+            return
+        self._init_ml_components()
+        if self.fast_mode:
+            self.ensure_gesture_model_async()
 
     @property
     def ready(self) -> bool:
@@ -257,28 +388,10 @@ class AssistiveCommunicationRuntime:
 
     def _smooth_emotion(self, detected: bool, scores):
         if not detected or scores is None:
-            self._emotion_scores.clear()
             return None, 0.0
-
-        self._emotion_scores.append(np.array(scores, dtype=np.float32))
-        averaged = np.mean(np.stack(self._emotion_scores, axis=0), axis=0)
-        top_index = int(np.argmax(averaged))
-        top_confidence = float(averaged[top_index])
-        sorted_scores = np.sort(averaged)
-        second_confidence = float(sorted_scores[-2]) if len(sorted_scores) > 1 else 0.0
-        margin = top_confidence - second_confidence
-
-        if top_index >= len(self.emotion_model.labels):
-            return None, 0.0
-
+        top_index = int(np.argmax(scores))
+        top_confidence = float(scores[top_index])
         label = self.emotion_model.labels[top_index]
-        if label == "neutral":
-            if top_confidence < 0.75 or margin < 0.18:
-                return None, top_confidence
-        else:
-            if top_confidence < 0.50 or margin < 0.08:
-                return None, top_confidence
-
         return label, top_confidence
 
     def read_prediction(self) -> Optional[FramePrediction]:
@@ -290,22 +403,34 @@ class AssistiveCommunicationRuntime:
             return None
 
         frame, timestamp = result
+        return self.process_frame(frame, timestamp)
+
+    def process_frame(self, frame: Any, timestamp: float) -> Optional[FramePrediction]:
+        self.ensure_ml_ready()
         raw_frame = frame.copy()
-        hand_landmarks = None
+        holistic_results = None
         face_landmarks = None
         face_bbox = None
         face_area_ratio = 0.0
 
-        if self.preprocess is not None:
-            frame, hand_landmarks, face_landmarks, face_bbox = self.preprocess.process(frame)
+        if self.preprocess is None:
+            return FramePrediction(frame=frame, timestamp=timestamp)
+
+        frame, holistic_results, face_landmarks, face_bbox = self.preprocess.process(frame)
 
         hand_features = None
         face_image = None
-        if self.feature_extractor is not None:
-            hand_features = self.feature_extractor.extract_hand_features(hand_landmarks, frame.shape)
+        if self.feature_extractor is not None and holistic_results is not None:
+            hand_features = self.feature_extractor.extract_holistic_features(
+                holistic_results.pose_landmarks,
+                holistic_results.left_hand_landmarks,
+                holistic_results.right_hand_landmarks,
+            )
         if face_bbox is not None:
             x, y, bw, bh = face_bbox
-            face_area_ratio = (max(0, bw) * max(0, bh)) / float(raw_frame.shape[0] * raw_frame.shape[1])
+            face_area_ratio = (max(0, bw) * max(0, bh)) / float(
+                raw_frame.shape[0] * raw_frame.shape[1]
+            )
             face_image = self._extract_aligned_face(raw_frame, face_landmarks, face_bbox)
 
         raw_gesture = None
@@ -313,23 +438,91 @@ class AssistiveCommunicationRuntime:
         gesture_confidence = 0.0
         emotion_confidence = 0.0
         emotion_scores = None
-        if self.gesture_model is not None:
-            raw_gesture, gesture_confidence = self.gesture_model.predict_with_confidence(hand_features)
-        if self.emotion_model is not None and face_area_ratio >= 0.05:
-            emotion_scores = self.emotion_model.predict_scores(face_image)
-            raw_emotion, emotion_confidence = self.emotion_model.predict_with_confidence(face_image)
 
-        hand_detected = hand_landmarks is not None
-        face_detected = face_landmarks is not None
+        # Buffer hand features for LSTM sequence model
+        if hand_features is not None:
+            self._gesture_buffer.append(hand_features)
+        else:
+            self._gesture_buffer.append([0.0] * 225)
+
+        hand_detected = holistic_results is not None and (
+            holistic_results.left_hand_landmarks is not None
+            or holistic_results.right_hand_landmarks is not None
+        )
+
+        if (
+            self.gesture_model is not None
+            and hand_detected
+            and len(self._gesture_buffer) == self._gesture_sequence_length
+        ):
+            raw_gesture, gesture_confidence = self.gesture_model.predict_with_confidence(
+                list(self._gesture_buffer)
+            )
+
+        if self.emotion_model is not None and face_area_ratio >= 0.01:
+            emotion_scores = self.emotion_model.predict_scores(face_image)
+            if emotion_scores is not None:
+                top_index = int(np.argmax(emotion_scores))
+                emotion_confidence = float(emotion_scores[top_index])
+                if top_index < len(self.emotion_model.labels):
+                    raw_emotion = self.emotion_model.labels[top_index]
+
+        face_detected = face_bbox is not None
+
         gesture = self._stabilize_label(
             key="gesture",
             detected=hand_detected,
             candidate=raw_gesture,
             confidence=gesture_confidence,
-            threshold=0.60,
-            required_hits=3,
+            threshold=self._gesture_threshold,
+            required_hits=self._gesture_hits,
         )
+        # In fast/web mode, show the live model label while stabilizer warms up.
+        if gesture is None and raw_gesture and gesture_confidence >= 0.20:
+            gesture = raw_gesture
+
         emotion, emotion_confidence = self._smooth_emotion(face_detected, emotion_scores)
+
+        # ---- Sentence Accumulation ----------------------------------------
+        word = gesture
+        if word is None and raw_gesture and gesture_confidence >= 0.25:
+            word = raw_gesture
+        self._accumulator.push(word)
+        accumulated = self._accumulator.sentence()
+
+        # ---- Emotion-Aware Interpretation ------------------------------------
+        interpreted = apply_emotion_semantics(accumulated, emotion) if accumulated else ""
+
+        # ---- Translation -----------------------------------------------------
+        translated = interpreted
+        if (
+            interpreted
+            and self.target_language != "en"
+            and self.translator is not None
+        ):
+            translated = self.translator.translate(interpreted, self.target_language)
+
+        # ---- TTS (speak only when interpretation changes) --------------------
+        if (
+            self.tts_enabled
+            and self.speech
+            and interpreted
+            and interpreted != self.last_spoken_output
+            and (gesture or emotion)
+        ):
+            speak_text = translated if translated else interpreted
+            self.speech.speak(speak_text)
+            self.last_spoken_output = interpreted
+        elif not interpreted:
+            self.last_spoken_output = None
+
+        # Legacy 'output' kept for backward compat
+        legacy_output = build_output_message(
+            gesture=gesture,
+            emotion=emotion,
+            hand_detected=hand_detected,
+            face_detected=face_detected,
+        )
 
         return FramePrediction(
             frame=frame,
@@ -342,15 +535,15 @@ class AssistiveCommunicationRuntime:
                 emotion_scores,
                 self.emotion_model.labels if self.emotion_model is not None else [],
             ),
-            output=build_output_message(
-                gesture=gesture,
-                emotion=emotion,
-                hand_detected=hand_detected,
-                face_detected=face_detected,
-            ),
+            accumulated_sentence=accumulated,
+            interpreted_sentence=interpreted,
+            translated_output=translated if self.target_language != "en" else None,
+            output=legacy_output,
             warnings=list(self.warnings),
         )
 
     def release(self) -> None:
         if self.video is not None:
             self.video.release()
+        if self.speech is not None:
+            self.speech.shutdown()
