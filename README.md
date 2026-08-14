@@ -11,91 +11,100 @@ The runtime now:
 
 ## Project Directory Structure
 
-The project has been cleaned and structured into a highly organized folder layout:
+The repository contains the source code, trained model files, utilities, web interface, and tests required for the project.
 
-```
+```text
 project/
-├── app.py                      # Desktop entry point
+├── app.py                      # Desktop application entry point
 ├── web_app.py                  # Flask web application entry point
 ├── requirements.txt            # Project dependencies
-├── pyproject.toml              # Metadata and project description
 ├── .gitignore                  # Git ignore rules
-├── .python-version             # Python version pin (3.12)
-├── README.md                   # This README file
+├── README.md                   # Project documentation
 │
-├── docs/                       # Project documentation and analysis
-│   ├── PLAN.md                 # Original development plan
-│   ├── PROJECT_ANALYSIS.md     # In-depth architectural analysis
-│   └── project_algorithm_and_issues_report.md # Algorithmic report
+├── scripts/                    # Utility and testing scripts
+│   ├── fix_data.py             # Data normalization utility
+│   ├── verify_project.py       # Full-system verification
+│   └── test_camera.py          # Webcam testing utility
 │
-├── scripts/                    # Utility scripts for developers
-│   ├── fix_data.py             # Script to normalize training coordinates
-│   ├── verify_project.py       # Full-system verification test
-│   └── test_camera.py          # Ad-hoc webcam connection testing tool
-│
-├── models/                     # Deep Learning models and training code
-│   ├── gesture/                # Hand gesture recognition pipeline (LSTM)
+├── models/                     # Machine learning models and training code
+│   ├── gesture/                # Hand gesture recognition pipeline
 │   │   ├── gesture_model.py
 │   │   ├── gesture_model.h5
 │   │   ├── lstm_gesture_model.h5
 │   │   ├── lstm_gesture_model.keras
 │   │   ├── labels.txt
-│   │   ├── train_model.py
 │   │   ├── train_sequence_model.py
 │   │   └── extract_and_train.py
+│   │
 │   └── emotion/                # Facial emotion recognition pipeline
 │       ├── emotion_model.py
 │       ├── emotion_model.h5
 │       ├── normalization.npz
-│       ├── labels.txt
-│       ├── emotion_data_collection.py
-│       └── train_emotion_model.py
+│       └── labels.txt
 │
-├── utils/                      # Helper modules and reusable logic
+├── utils/                      # Reusable application modules
 │   ├── pipeline.py             # Core real-time fusion pipeline
-│   ├── input_module.py         # OpenCV and MediaPipe camera feed handler
-│   ├── feature_extraction.py   # Coordinate processing and scaling
-│   ├── preprocessing.py        # Frame normalization and augmentation
-│   ├── data_collection.py      # Script to save raw landmarks
-│   ├── translation.py          # Language translation support
+│   ├── input_module.py         # OpenCV and MediaPipe camera handling
+│   ├── feature_extraction.py   # Landmark feature processing
+│   ├── preprocessing.py        # Frame preprocessing
 │   ├── speech.py               # Text-to-speech integration
+│   ├── translation.py          # Translation support
 │   └── runtime_env.py          # Environment diagnostics
 │
-├── dataset/                    # Training and feature datasets
-│   ├── gesture/                # Gestures, including 'ASL Dataset'
-│   │   └── ASL Dataset/
-│   ├── emotion/                # Emotion landmark features and datasets
-│   │   ├── emotion_features.csv
-│   │   └── FER2013/
-│   └── sign_language/          # Signs, including 'wlasl_features'
-│       └── wlasl_features/
-│
-├── static/                     # Web assets (CSS)
+├── static/                     # Web assets
 │   └── styles.css
 │
 ├── templates/                  # Flask templates
 │   └── index.html
 │
-└── tests/                      # Suite of automated tests
+└── tests/                      # Automated tests
     └── test_project_smoke.py
 ```
 
+> **Note:** The dataset, virtual environment, editor configuration, and local documentation are intentionally excluded from this repository.
+
 ---
 
-## Setup and Virtual Environment
+## Dataset
 
-This project utilizes a consolidated, robust virtual environment in `tf_venv/` preconfigured with Python `3.12.4` and all required packages (TensorFlow, Keras, MediaPipe, OpenCV, Flask, NumPy).
+The project uses the **FER2013 (Facial Expression Recognition 2013)** dataset for facial emotion recognition.
 
-### Activate the Environment:
+The dataset is **not included in this repository** because of its size. It must be obtained separately for local training and placed under the project's ignored `dataset/` directory.
 
-Activate the environment using PowerShell:
+Expected local dataset path for emotion training:
+
+```text
+dataset/
+└── emotion/
+    └── FER2013/
+        └── train/
+```
+
+The `dataset/` directory is excluded through `.gitignore`, so the dataset will not be uploaded to GitHub.
+
+---
+
+## Setup
+
+Create a Python virtual environment locally. The environment itself is intentionally excluded from GitHub.
+
+### Windows PowerShell
+
 ```powershell
+python -m venv tf_venv
 .\tf_venv\Scripts\Activate.ps1
 ```
 
-Or using Git Bash / Cmd:
+### Git Bash / Command Prompt
+
 ```bash
 source tf_venv/Scripts/activate
+```
+
+Install the required dependencies:
+
+```bash
+pip install -r requirements.txt
 ```
 
 ---
@@ -104,19 +113,19 @@ source tf_venv/Scripts/activate
 
 To check that the files, imports, runtime wiring, and Flask routes are ready, run:
 
-```bash
+```powershell
 .\tf_venv\Scripts\python.exe scripts/verify_project.py
 ```
 
-Run the smoke tests to check the components:
+Run the smoke tests:
 
-```bash
+```powershell
 .\tf_venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
 Probe webcam access directly:
 
-```bash
+```powershell
 .\tf_venv\Scripts\python.exe scripts/test_camera.py
 ```
 
@@ -124,15 +133,15 @@ Probe webcam access directly:
 
 ## Run The Project
 
-### Desktop application:
+### Desktop application
 
-```bash
+```powershell
 .\tf_venv\Scripts\python.exe app.py
 ```
 
-### Browser application:
+### Browser application
 
-```bash
+```powershell
 .\tf_venv\Scripts\python.exe web_app.py
 ```
 
@@ -144,40 +153,54 @@ Then open `http://127.0.0.1:5000` in your web browser.
 
 Collect gesture samples:
 
-```bash
+```powershell
 .\tf_venv\Scripts\python.exe utils/data_collection.py
 ```
 
 Train the gesture model:
 
-```bash
+```powershell
 .\tf_venv\Scripts\python.exe models/gesture/train_model.py
 ```
 
 Collect emotion samples:
 
-```bash
+```powershell
 .\tf_venv\Scripts\python.exe models/emotion/emotion_data_collection.py --label happy
 ```
 
 Train the emotion model:
 
-```bash
+```powershell
 .\tf_venv\Scripts\python.exe models/emotion/train_emotion_model.py
 ```
 
-If `dataset/emotion/emotion_features.csv` does not exist yet, the trainer will build it from the FER2013 dataset folders at `dataset/emotion/FER2013/train`.
+If `dataset/emotion/emotion_features.csv` does not exist yet, the trainer can build it from the FER2013 dataset placed under `dataset/emotion/FER2013/train`.
 
 ---
 
 ## Notes & Troubleshooting
 
-- **Exiting**: Press `q` in OpenCV windows to exit camera feeds.
-- **Model Files**: Gesture prediction defaults to `models/gesture/gesture_model.h5`. Emotion prediction defaults to `models/emotion/emotion_model.h5`.
-- **Hugging Face Option**: When `transformers` and `torch` are available, the app prefers the pretrained `trpakov/vit-face-expression` backend for state-of-the-art emotion accuracy.
-- **Webcam access**: If `verify_project.py` says the runtime initialized but camera access is unavailable, Windows is not exposing your webcam to the app. Close any other apps using the webcam.
-- **Alternative Camera Index**: If the default camera index is incorrect, override it via environment variables:
-  ```powershell
-  $env:ASSISTIVE_CAMERA_INDEX="1"
-  .\tf_venv\Scripts\python.exe app.py
-  ```
+- **Exiting:** Press `q` in OpenCV windows to exit camera feeds.
+- **Model files:** Gesture prediction defaults to `models/gesture/gesture_model.h5`. Emotion prediction defaults to `models/emotion/emotion_model.h5`.
+- **Hugging Face option:** When `transformers` and `torch` are available, the app can use the pretrained `trpakov/vit-face-expression` backend for emotion recognition.
+- **Webcam access:** If `verify_project.py` says the runtime initialized but camera access is unavailable, close other applications using the webcam and check Windows camera permissions.
+- **Alternative camera index:** If the default camera index is incorrect, override it with an environment variable:
+
+```powershell
+$env:ASSISTIVE_CAMERA_INDEX="1"
+.\tf_venv\Scripts\python.exe app.py
+```
+
+---
+
+## Repository Exclusions
+
+The following local resources are intentionally excluded from version control:
+
+- `dataset/` — large training datasets
+- `tf_venv/` — local Python virtual environment
+- `.vscode/` and `.idea/` — editor configuration
+- `docs/` — local project documentation
+
+This keeps the public repository focused on the source code and project resources needed to understand and reproduce the system.
