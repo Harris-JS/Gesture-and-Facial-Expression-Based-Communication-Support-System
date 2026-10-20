@@ -194,13 +194,13 @@ $env:ASSISTIVE_CAMERA_INDEX="1"
 
 ---
 
-## Repository Exclusions
+## Project Team & Contributors
 
-The following local resources are intentionally excluded from version control:
+This project was developed collaboratively by our project team.
 
-- `dataset/` — large training datasets
-- `tf_venv/` — local Python virtual environment
-- `.vscode/` and `.idea/` — editor configuration
-- `docs/` — local project documentation
+Team Members
 
-This keeps the public repository focused on the source code and project resources needed to understand and reproduce the system.
+- Harris Selvaraj J. — "@Harris-JS" (https://github.com/Harris-JS)
+- Balachandran N — "@Balachandran30" (https://github.com/Balachandran30)
+- Hamsa Vardhen M T — "@hamsavardhen" (https://github.com/hamsavardhen)
+- Gokul G — "@GokulGMS" (https://github.com/GokulGMS)
